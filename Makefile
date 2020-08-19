@@ -19,4 +19,4 @@ $(PARTIALS):
 	$(MAKE) -C $(dir $@) $(notdir $@).so 
 
 clean:
-	rm -rf Compiler/*.o Test/*.o
+	rm -rf Compiler/*.o Compiler/*.so Test/*.o
