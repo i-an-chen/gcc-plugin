@@ -45,15 +45,15 @@
 
 /*allocation and deallocation table*/
 struct ptb{
-	tree target;
-	location_t loc;
-	ptb *next;
-	int state;
+	tree target;      // debug_tree  debug_head
+	location_t loc;		// warning_at
+	ptb *next;			//print_pointer_table_new
+	int state;			
 	bool may_realloc, is_phi_stmt;
-	gimple *last_stmt, *dealloc_stmt;
-	basic_block bb;
-	cgraph_node *node;
-	gimple* caller;
+	gimple *last_stmt;
+	basic_block bb;   //bb->index
+	cgraph_node *node;	
+	gimple* caller; //
 	function *fun;
 	bool removed;
 	bool inbranch;
@@ -73,6 +73,7 @@ struct gimple_array
 struct fdecl{
 	tree fndecl;
 	tree fn;
+	gimple *g;
 };
 
 /*function decl and location*/
@@ -110,6 +111,7 @@ bool ipa=false;
 
 /*main function*/
 function* main_fun;
+cgraph_node* main_node;
 
 
 bool bb_in_branch_p(ptb *table){
@@ -298,9 +300,9 @@ bool path_intersection_tvpt(vector<pair<fdecl,location_t>> path,vector<pair<fdec
 		if(path.size()-i<path2.size())
 			return false;
 
-		fprintf(stderr,"=path_intersection_tvpt= ii=%d i=%d\n",ii,i);
-		fprintf(stderr,"=path1ptr  %s  %d=\n",IDENTIFIER_POINTER (DECL_NAME(path[i+ii].first.fndecl)),LOCATION_LINE(path[i+ii].second));
-		fprintf(stderr,"=path2ptr  %s  %d=\n",IDENTIFIER_POINTER (DECL_NAME(path2[ii].first.fndecl)),LOCATION_LINE(path2[ii].second));
+		//fprintf(stderr,"=path_intersection_tvpt= ii=%d i=%d\n",ii,i);
+		//fprintf(stderr,"=path1ptr  %s  %d=\n",IDENTIFIER_POINTER (DECL_NAME(path[i+ii].first.fndecl)),LOCATION_LINE(path[i+ii].second));
+		//fprintf(stderr,"=path2ptr  %s  %d=\n",IDENTIFIER_POINTER (DECL_NAME(path2[ii].first.fndecl)),LOCATION_LINE(path2[ii].second));
 
 		if(path[i+ii].first.fndecl == path2[ii].first.fndecl){
 			if(path[i+ii].second == path2[ii].second){
@@ -350,7 +352,7 @@ bool same_path(tree t1,tree t2){
 	
 	
 }
-void tracer_caller(cgraph_node *dest,cgraph_node *current,vector<pair<fdecl ,location_t>> *path){
+void tracer_caller(cgraph_node *dest,cgraph_node *current,vector<pair<fdecl ,location_t>> *path,bool only_track){
 	//fprintf(stderr,"======dest:%s current:%s\n",function_name (DECL_STRUCT_FUNCTION(dest->decl)),function_name (DECL_STRUCT_FUNCTION(current->decl)));
 	//debug_tree(current->decl);
 	cgraph_node *ftn;
@@ -365,6 +367,7 @@ void tracer_caller(cgraph_node *dest,cgraph_node *current,vector<pair<fdecl ,loc
 		fd.fn=a;
 		tree b=gimple_call_fndecl(ga);
 		fd.fndecl=b;
+		fd.g=ga;
 		function *f;
 		f=DECL_STRUCT_FUNCTION(gimple_call_fndecl(ga));
 
@@ -403,7 +406,9 @@ void tracer_caller(cgraph_node *dest,cgraph_node *current,vector<pair<fdecl ,loc
 					FOR_EACH_USE_TABLE(used_stmt,stmt){
 						//gimple_bb(SSA_NAME_DEF_STMT (gimple_phi_arg_def(phi, i))
 						if(gimple_code(stmt) == GIMPLE_RETURN){
-							tracer_caller(dest,ftn,&next);
+							tracer_caller(dest,ftn,&next,false);
+						}else if(only_track){
+							tracer_caller(dest,ftn,&next,false);
 						}
 					}
 				}
@@ -414,7 +419,7 @@ void tracer_caller(cgraph_node *dest,cgraph_node *current,vector<pair<fdecl ,loc
 
 void search_all_path(ptb *free_t,ptb *malloc_t){
 	vector<pair<fdecl,location_t>> path;
-	tracer_caller(free_t->node,malloc_t->node,&path);
+	tracer_caller(free_t->node,malloc_t->node,&path,false);
 }
 
 bool bb_in_same_loop_alloc_free(basic_block m,basic_block f){
@@ -597,6 +602,7 @@ void new_memory_leak_analysis (ptb *ptable, ptb *ftable){
 						table1->state = POINTER_STATE_MAY_IS_FREE;
 					}
 				}else{
+					/*Algorithm 7*/
 					//debug_gimple_stmt(def_stmt);
 					if(gimple_code (def_stmt) == GIMPLE_PHI){
 						for(unsigned i=0;i<gimple_phi_num_args(def_stmt);i++){
@@ -621,6 +627,9 @@ void new_memory_leak_analysis (ptb *ptable, ptb *ftable){
 			if(table1->state != POINTER_STATE_MAY_IS_FREE){
 				warning_at(table1->loc, 0,"Memory Leak Error!");
 				must++;
+				//debug_tree();
+				//debug_head();				
+				//debug_tree();
 				//fprintf(fp,"%s Memory Leak Error \n",DECL_SOURCE_FILE (table1->fun->decl)); //ppp
 				//add_free_stmt(table1, table1->target);
 				table1->state = POINTER_STATE_IS_FREE;
@@ -647,6 +656,57 @@ void new_memory_leak_analysis (ptb *ptable, ptb *ftable){
 	}  
 }
 
+/*Algorithm 10*/
+
+
+bool path_intersection_1(vector<pair<fdecl,location_t>> path,vector<pair<fdecl,location_t>> path2){
+	vector<pair<fdecl,location_t>> temp;
+	cgraph_node *node;
+
+	for(int i=0;i<path.size();i++){
+		for(int j=0;i<path2.size();j++){
+			if(path[i].first.fndecl == path2[j].first.fndecl){
+				node=*(fnode->get(path[i].first.fn));
+				if(fDFS->get(node)->is_succ(gimple_bb(path[i].first.g),gimple_bb(path2[j].first.g))){
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+bool intersection_1(tree t1,tree t2){
+	if(tvpt->get(t1)==NULL || tvpt->get(t2)==NULL)
+		return false;
+	var_points_to vpt=*(tvpt->get(t1));
+	var_points_to vpt2=*(tvpt->get(t2));
+	int ii=0;
+	vector<vector<pair<fdecl,location_t>>> path=vpt.may_malloc_path;
+	vector<vector<pair<fdecl,location_t>>> path2=vpt2.may_malloc_path;
+
+	for(int i=0;i<path.size();i++){
+		for(int j=0;j<path2.size();j++){
+			if (path_intersection_1(path[i],path2[j])){
+				return true;
+			}
+		}
+	}
+	return false;
+	
+	
+}
+
+bool from_different_function(ptb *f1,ptb *f2){
+	if(main_node!=NULL){
+		vector<pair<fdecl,location_t>> path;
+		vector<pair<fdecl,location_t>> path2;
+		tracer_caller(main_node,f1->node,&path,true);
+		tracer_caller(main_node,f2->node,&path2,true);
+	
+		return intersection_1(f1->target,f2->target);
+	}
+	return false;
+}
 
 void new_double_free_analysis(ptb *ptable, ptb *ftable){
 	
@@ -668,6 +728,7 @@ void new_double_free_analysis(ptb *ptable, ptb *ftable){
 	struct ptr_info_def* pi2;
 	struct pt_solution* pt2;
 	//search_imm_use(used_stmt, malloc_t->target);
+	/*Algorithm 8*/
 	FOR_EACH_TABLE(free_t,t){
 			//debug_head(t);
 			total++;
@@ -690,6 +751,7 @@ void new_double_free_analysis(ptb *ptable, ptb *ftable){
 			if(free_t->bb->loop_father->header->index!=0){
 				warning_at(free_t->loc,0,"May Double Free Error!: This free statement is in a loop which may cause a double-free error.");
 				may++;
+				fprintf(stderr,"%s \n",get_name(free_t->node->decl));
 				//fprintf(fp,"%s May Double Free Error: This free statement is in a loop which may cause a double-free error.\n",DECL_SOURCE_FILE (main_fun->decl));
 				//continue;
 			}
@@ -740,15 +802,65 @@ void new_double_free_analysis(ptb *ptable, ptb *ftable){
 							errorm=POINTER_MUST;
 						}
 						else if (!dominated_by_p(CDI_DOMINATORS,free_t->bb,free_t->fun->cfg->x_exit_block_ptr->prev_bb) && !dominated_by_p(CDI_DOMINATORS,free2_t->bb,free2_t->fun->cfg->x_exit_block_ptr->prev_bb)){
-							if(fDFS->get(free_t->node)->is_succ(free_t->bb,free2_t->bb)){
+							if(fDFS->get(free_t->node)->is_succ(free_t->bb,free2_t->bb) || fDFS->get(free2_t->node)->is_succ(free2_t->bb,free_t->bb)){
 								errorm=POINTER_MAY;
 							}
 						}
+						int phicount=0;
+						/*algorithm 9*/
+						if(fDFS->get(free_t->node)->is_succ(free_t->bb,free2_t->bb)){
+							if(gimple_code (free2_t->last_stmt) == GIMPLE_PHI){
+								for(unsigned i=0;i<gimple_phi_num_args(free2_t->last_stmt);i++){
+
+									tree argu=gimple_phi_arg_def(free2_t->last_stmt,i);
+									gphi *phi=as_a <gphi *> (free2_t->last_stmt);
+									basic_block src = gimple_phi_arg_edge (phi, i)->src;
+									
+									//fprintf(stderr,"phi_argu:%d ",i);
+									//debug_tree(argu);
+									pi2=get_ptr_info (argu);
+									pt2=&pi2->pt;
+									if(pt2->vars==NULL)
+										continue;
+									if(bitmap_intersect_p(pt->vars,pt2->vars)){
+										if(fDFS->get(free_t->node)->is_succ(free_t->bb,src)){
+											errorm=POINTER_MAY;
+											phicount++;
+										}
+									}
+								}
+							}						
+						}else if(fDFS->get(free_t->node)->is_succ(free2_t->bb,free_t->bb)){
+							if(gimple_code (free_t->last_stmt) == GIMPLE_PHI){
+								for(unsigned i=0;i<gimple_phi_num_args(free_t->last_stmt);i++){
+
+									tree argu=gimple_phi_arg_def(free_t->last_stmt,i);
+									gphi *phi=as_a <gphi *> (free_t->last_stmt);
+									basic_block src = gimple_phi_arg_edge (phi, i)->src;
+									
+									//fprintf(stderr,"phi_argu:%d ",i);
+									//debug_tree(argu);
+									pi2=get_ptr_info (argu);
+									pt2=&pi2->pt;
+									if(pt2->vars==NULL)
+										continue;
+									if(bitmap_intersect_p(pt->vars,pt2->vars)){
+										if(fDFS->get(free_t->node)->is_succ(free2_t->bb,src)){
+											errorm=POINTER_MAY;
+											phicount++;
+										}
+									}
+								}
+							}	
+						}
+						if(phicount!=0)
+							errorm=POINTER_NOT;
 						free_dominance_info (CDI_DOMINATORS);
 						pop_cfun();
 						//fprintf(stderr,"		=======search ptable %d %d========\n",free_t->fun,free2_t->fun);
-						//do interprocedural allocation check
+						
 						if(ipa){
+							/*algorithm 11*/
 							FOR_EACH_TABLE(malloc_t,t3){
 								if(ptr_derefs_may_alias_p(free_t->target,malloc_t->target)){
 									if(free_t->node!=malloc_t->node){
@@ -778,12 +890,18 @@ void new_double_free_analysis(ptb *ptable, ptb *ftable){
 						//fprintf(stderr,"	=======search ftable2 end========\n");
 					}
 					else{
-						errorm=POINTER_MAY;
+						if(ipa){
+							/*algorithm 10*/
+							//if(from_different_function(free_t,free2_t))
+								//errorm=POINTER_MAY;
+						}
 					}
 					switch(errorm){
 						case POINTER_MUST:
 							warning_at(free_t->loc,0,"Double free error!");
 							warning_at(free2_t->loc,0,"");
+							fprintf(stderr,"%s \n",get_name(free_t->node->decl));
+							fprintf(stderr,"%s \n",get_name(free2_t->node->decl));
 							//fprintf(fp,"%s Double-free must\n",DECL_SOURCE_FILE (main_fun->decl));
 							
 							must++;
@@ -791,6 +909,9 @@ void new_double_free_analysis(ptb *ptable, ptb *ftable){
 						case POINTER_MAY:
 							warning_at(free_t->loc,0,"May Double free error!");
 							warning_at(free2_t->loc,0,"");
+							
+							fprintf(stderr,"%s \n",get_name(free_t->node->decl));
+							fprintf(stderr,"%s \n",get_name(free2_t->node->decl));
 							//fprintf(fp,"%s Double-free may\n",DECL_SOURCE_FILE (main_fun->decl));
 							may++;
 							break;
@@ -882,6 +1003,31 @@ void collect_malloc(gimple *gc,cgraph_node *node,basic_block bb){
 	tvpt->put(gimple_call_lhs (gc),vpt);
 }
 
+void print_pointer_table_new(ptb *ptable){
+	ptb *temp1=ptable;
+	while(temp1->target!=NULL_TREE ){
+		if(get_name(temp1->target)!=NULL){
+			debug_head(temp1->target);
+			warning_at(temp1->loc,0, "%s", get_name(temp1->target));
+			struct ptr_info_def *pi=SSA_NAME_PTR_INFO (temp1->target);
+			struct pt_solution *pt=&pi->pt;
+			debug(pt);
+			
+			fprintf(stderr,"address:%d \n",temp1->target);
+		}
+		else {
+			debug_head(temp1->target);
+			warning_at(temp1->loc,0, "NULL");
+			struct ptr_info_def *pi=SSA_NAME_PTR_INFO (temp1->target);
+			struct pt_solution *pt=&pi->pt;
+			debug(pt);
+			fprintf(stderr,"address:%d \n",temp1->target);
+		}
+		if(temp1->next!=NULL)
+			temp1=temp1->next;
+		else break;
+	}
+}
 void detect(){
 	struct cgraph_node *node;
 	struct var_points_to vpt;
@@ -904,8 +1050,10 @@ void detect(){
 		push_cfun(node->get_fun());
 		if (cfun==NULL)
 			continue;
-		if(strcmp(get_name(cfun->decl),"main")==0)
+		if(strcmp(get_name(cfun->decl),"main")==0){
 			main_fun=cfun;
+			main_node=node;
+		}
 		//fprintf(stderr,"=======node_fun:%s=========\n",get_name(cfun->decl));
 
 		/*initialization DFS graph*/
@@ -967,7 +1115,7 @@ void insert_always_inline(){
 
 		//fprintf(stderr,"attribute:%s \n",IDENTIFIER_POINTER (DECL_ASSEMBLER_NAME (node->decl)));
 		//node->debug();
-		//fprintf(stderr,"=======fun:%d=========\n",node->decl);
+		//fprintf(stderr,"=======fun:%d=========\n",get_name(node->decl));
 		tree attr ;
 		enum availability avail;
 		for (e = node->callees; e; e = e->next_callee)
@@ -993,7 +1141,7 @@ void insert_always_inline(){
 		//node->debug();
 		push_cfun(DECL_STRUCT_FUNCTION (node->decl));
 		if(cfun==NULL){
-			//fprintf(stderr,"=======NULL=========\n");
+			fprintf(stderr,"=======NULL=========\n");
 		}
 		FOR_EACH_BB_FN (bb, cfun){
 			
@@ -1035,4 +1183,3 @@ void insert_always_inline(){
 	}
 
 }
-
